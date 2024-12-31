@@ -1,31 +1,63 @@
+"use client";
+
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Project } from '@/types/database';
+import { useToast } from '@/hooks/use-toast';
 
-export function useProjects() {
+export function useProjects(stage?: string) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
+    let mounted = true;
+
     async function fetchProjects() {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('projects')
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (error) throw error;
-        setProjects(data);
+        if (stage) {
+          query = query.eq('stage', stage);
+        }
+
+        const { data, error: supabaseError } = await query;
+
+        if (supabaseError) {
+          if (supabaseError.code === '42P01') {
+            // Table doesn't exist yet - this is expected on first load
+            if (mounted) {
+              setProjects([]);
+            }
+          } else {
+            throw supabaseError;
+          }
+        } else if (mounted) {
+          setProjects(data || []);
+        }
       } catch (e) {
-        setError(e as Error);
+        console.error('Error fetching projects:', e);
+        toast({
+          title: "Error",
+          description: "Failed to load projects. Please try again later.",
+          variant: "destructive",
+        });
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     }
 
     fetchProjects();
-  }, []);
 
-  return { projects, loading, error };
+    return () => {
+      mounted = false;
+    };
+  }, [stage, toast]);
+
+  return { projects, loading };
 }
